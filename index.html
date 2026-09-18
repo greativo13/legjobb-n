@@ -650,6 +650,9 @@ function renderResult(r){
     }
     if(r.quote) body += '<div class="rblock"><div class="quote">'+r.quote+'<span class="who">— '+esc(name())+'</span></div></div>';
   }
+  if(r._aiError){
+    body = '<div class="rblock" style="background:color-mix(in srgb,var(--danger) 10%, transparent);border:1px solid color-mix(in srgb,var(--danger) 30%, transparent);border-radius:10px;padding:11px 12px"><div class="h" style="color:var(--danger);margin-bottom:5px">Az élő AI most nem válaszolt</div><p style="font-size:12.5px;color:var(--ink-soft);white-space:pre-wrap;word-break:break-word">'+esc(r._aiError)+'</p></div>' + body;
+  }
   var foot;
   if(r._done){
     foot = '<div class="doneflag">✓ Megtetted — sorozat: '+streakCount()+' nap 🔥</div>';
@@ -742,10 +745,11 @@ function askCompass(){
     }, function(err){
       compass.loading=false;
       var r = offline();
+      if(err && err._msg && err.message!=="no-ai") r._aiError = err._msg;
       compass.result=r;
       pushHistory(q, r, false, mode);
       render();
-      if(err && err._msg) toast(err._msg); else toast("Az AI most nem elérhető — offline válasz");
+      toast("Az AI most nem elérhető — offline válasz");
     });
   }else{
     var r = offline();
@@ -785,7 +789,7 @@ function callJSON(input){
       }
       if(providerName()==="openrouter"){
         fetch("https://openrouter.ai/api/v1/chat/completions", { method:"POST", headers:{ "content-type":"application/json", "authorization":"Bearer "+state.settings.apiKey, "x-title":"Legjobb Enem" },
-          body: JSON.stringify({ model: openrouterModel(), max_tokens:2000, messages:[{ role:"user", content: input + "\n\nKizárólag a JSON objektumot add vissza, semmi mást." }] })
+          body: JSON.stringify({ model: OR_PRIMARY, max_tokens:2000, messages:[{ role:"user", content: input + "\n\nKizárólag a JSON objektumot add vissza, semmi mást." }] })
         }).then(function(res){ if(!res.ok) throw new Error("http"); return res.json(); }).then(function(data){
           var text=(data.choices&&data.choices[0]&&data.choices[0].message)?data.choices[0].message.content:"";
           resolve(parseJSON(text));
@@ -839,7 +843,7 @@ function getAI(situation, mode){
       if(state.settings.apiKey){
         var p = providerName();
         var fn = p==="gemini" ? callGemini : (p==="openrouter" ? callOpenRouter : callAI);
-        fn(situation, mode).then(resolve, function(e){ var er=new Error("api"); er._msg="AI hiba — offline válasz"; reject(er); });
+        fn(situation, mode).then(resolve, function(e){ var er=new Error("api"); er._msg=(e&&e.message)?String(e.message):"ismeretlen hiba"; reject(er); });
       } else { var er=new Error("no-ai"); reject(er); }
     };
     if(window.claude && typeof window.claude.use === "function"){
@@ -904,25 +908,37 @@ function callAI(situation, mode){
 }
 function providerName(){ return state.settings.provider || "openrouter"; }
 function geminiModel(){ return "gemini-2.0-flash"; }
-function openrouterModel(){ return qualityTier()==="quick" ? "meta-llama/llama-3.1-8b-instruct:free" : "meta-llama/llama-3.3-70b-instruct:free"; }
-function callOpenRouter(situation, mode){
-  var sys = mode==="biz" ? buildBizSystem() : buildSystemPrompt();
+var OR_PRIMARY = "deepseek/deepseek-v4-flash-0731:free";
+function orModels(){
+  if(qualityTier()==="quick") return ["deepseek/deepseek-v4-flash-0731:free","qwen/qwen3.8-27b:free","google/gemma-4-31b-it:free"];
+  if(qualityTier()==="complex") return ["z-ai/glm-5.2:free","nvidia/nemotron-3-super-120b-a12b:free","deepseek/deepseek-v4-flash-0731:free"];
+  return ["deepseek/deepseek-v4-flash-0731:free","z-ai/glm-5.2:free","qwen/qwen3.8-27b:free","google/gemma-4-31b-it:free"];
+}
+function orFetch(model, messages, maxTokens){
   return fetch("https://openrouter.ai/api/v1/chat/completions", {
     method:"POST",
     headers:{ "content-type":"application/json", "authorization":"Bearer "+state.settings.apiKey, "x-title":"Legjobb Enem" },
-    body: JSON.stringify({
-      model: openrouterModel(),
-      max_tokens: 1024,
-      messages:[ { role:"system", content: sys }, { role:"user", content: situation } ]
-    })
+    body: JSON.stringify({ model: model, max_tokens: maxTokens||1024, messages: messages })
   }).then(function(res){
-    if(!res.ok){ return res.text().then(function(t){ throw new Error("HTTP "+res.status+" "+t); }); }
+    if(!res.ok){ return res.text().then(function(t){ throw new Error("HTTP "+res.status+" "+String(t).slice(0,220)); }); }
     return res.json();
   }).then(function(data){
     var text = (data.choices && data.choices[0] && data.choices[0].message) ? data.choices[0].message.content : "";
-    if(!text) throw new Error("üres válasz");
+    if(!text) throw new Error("üres válasz a modelltől");
     return String(text).trim();
   });
+}
+function callOpenRouter(situation, mode){
+  var sys = mode==="biz" ? buildBizSystem() : buildSystemPrompt();
+  var msgs = [ { role:"system", content: sys }, { role:"user", content: situation } ];
+  var models = orModels();
+  var tryOne = function(i){
+    return orFetch(models[i], msgs, 1024).catch(function(e){
+      if(i+1 < models.length) return tryOne(i+1);
+      throw e;
+    });
+  };
+  return tryOne(0);
 }
 function callGemini(situation, mode){
   var sys = mode==="biz" ? buildBizSystem() : buildSystemPrompt();
