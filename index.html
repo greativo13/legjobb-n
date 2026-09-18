@@ -731,6 +731,7 @@ function dailyMessage(){
   return msgs[day % msgs.length];
 }
 function askCompass(){
+  if(compass.loading) return;
   var q = (compass.input||"").trim();
   var mode = compass.mode;
   if(!q){ toast(mode==="biz"?"Írd le a szakmai kérdésed":"Írj le pár szót arról, hol tartasz"); return; }
@@ -981,7 +982,7 @@ function buildBizPrompt(situation){
 function buildOfflineBiz(q){
   var what=bizAns("biz_what"), goal=bizAns("biz_goal"), chall=bizAns("biz_challenge"), strength=bizAns("biz_strength");
   var t = q.toLowerCase();
-  var isDecision = /\bvagy\b/.test(t) || t.indexOf("dönt")>=0 || t.indexOf("melyik")>=0 || t.indexOf("emeljek")>=0;
+  var isDecision = t.indexOf("dönt")>=0 || t.indexOf("melyik")>=0 || t.indexOf("emeljek")>=0 || t.indexOf("dilemm")>=0 || (/\bvagy\b/.test(t) && t.indexOf("?")>=0);
   var rp = [];
   if(what) rp.push('A vállalkozásod: <b>'+esc(what)+'</b>.');
   if(goal) rp.push('A célod: <b>'+esc(goal)+'</b>.');
@@ -1011,7 +1012,7 @@ function buildOfflineBiz(q){
 function buildOffline(q){
   var t = q.toLowerCase();
   var has = function(arr){ return arr.some(function(w){ return t.indexOf(w)>=0; }); };
-  var isDecision = has(["dönt","válasz","melyik","vagy ","vagy?"," vagy","dilemm","két ","kettő közül"]) || /\bvagy\b/.test(t);
+  var isDecision = has(["dönt","döntés","melyik","dilemm","két ","kettő közül","válasszak","válasszam"]) || (/\bvagy\b/.test(t) && t.indexOf("?")>=0);
   var dim =
     has(["edz","sport","fut","kondi","mozg","test","izom","fáradt","fárad","súly","fogy"]) ? "sport" :
     has(["munk","meló","karrier","projekt","tanul","vizsg","üzlet","céltalan","cél ","cél,","cél.","feladat","főnök","pénz"]) ? "career" :
