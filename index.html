@@ -258,7 +258,7 @@
 /* ============ persistence ============ */
 var LS_KEY = "legjobb_enem_v1";
 function loadState(){
-  var base = { profile:null, biz:null, history:[], actions:[], settings:{ aiEnabled:false, provider:"gemini", apiKey:"", quality:"default", theme:"system" } };
+  var base = { profile:null, biz:null, history:[], actions:[], settings:{ aiEnabled:false, provider:"openrouter", apiKey:"", quality:"default", theme:"system" } };
   try{
     var raw = localStorage.getItem(LS_KEY);
     if(raw){ var p = JSON.parse(raw); return Object.assign(base, p, { settings: Object.assign(base.settings, p.settings||{}) }); }
@@ -783,6 +783,15 @@ function callJSON(input){
         }, function(){ var er=new Error("api"); er._msg="AI hiba a javításnál"; reject(er); });
         return;
       }
+      if(providerName()==="openrouter"){
+        fetch("https://openrouter.ai/api/v1/chat/completions", { method:"POST", headers:{ "content-type":"application/json", "authorization":"Bearer "+state.settings.apiKey, "x-title":"Legjobb Enem" },
+          body: JSON.stringify({ model: openrouterModel(), max_tokens:2000, messages:[{ role:"user", content: input + "\n\nKizárólag a JSON objektumot add vissza, semmi mást." }] })
+        }).then(function(res){ if(!res.ok) throw new Error("http"); return res.json(); }).then(function(data){
+          var text=(data.choices&&data.choices[0]&&data.choices[0].message)?data.choices[0].message.content:"";
+          resolve(parseJSON(text));
+        }, function(){ var er=new Error("api"); er._msg="AI hiba a javításnál"; reject(er); });
+        return;
+      }
       fetch("https://api.anthropic.com/v1/messages",{
         method:"POST",
         headers:{ "content-type":"application/json", "x-api-key":state.settings.apiKey, "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" },
@@ -828,7 +837,8 @@ function getAI(situation, mode){
   return new Promise(function(resolve, reject){
     var tryApi = function(){
       if(state.settings.apiKey){
-        var fn = providerName()==="gemini" ? callGemini : callAI;
+        var p = providerName();
+        var fn = p==="gemini" ? callGemini : (p==="openrouter" ? callOpenRouter : callAI);
         fn(situation, mode).then(resolve, function(e){ var er=new Error("api"); er._msg="AI hiba — offline válasz"; reject(er); });
       } else { var er=new Error("no-ai"); reject(er); }
     };
@@ -892,8 +902,28 @@ function callAI(situation, mode){
     return text;
   });
 }
-function providerName(){ return state.settings.provider || "gemini"; }
+function providerName(){ return state.settings.provider || "openrouter"; }
 function geminiModel(){ return "gemini-2.0-flash"; }
+function openrouterModel(){ return qualityTier()==="quick" ? "meta-llama/llama-3.1-8b-instruct:free" : "meta-llama/llama-3.3-70b-instruct:free"; }
+function callOpenRouter(situation, mode){
+  var sys = mode==="biz" ? buildBizSystem() : buildSystemPrompt();
+  return fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method:"POST",
+    headers:{ "content-type":"application/json", "authorization":"Bearer "+state.settings.apiKey, "x-title":"Legjobb Enem" },
+    body: JSON.stringify({
+      model: openrouterModel(),
+      max_tokens: 1024,
+      messages:[ { role:"system", content: sys }, { role:"user", content: situation } ]
+    })
+  }).then(function(res){
+    if(!res.ok){ return res.text().then(function(t){ throw new Error("HTTP "+res.status+" "+t); }); }
+    return res.json();
+  }).then(function(data){
+    var text = (data.choices && data.choices[0] && data.choices[0].message) ? data.choices[0].message.content : "";
+    if(!text) throw new Error("üres válasz");
+    return String(text).trim();
+  });
+}
 function callGemini(situation, mode){
   var sys = mode==="biz" ? buildBizSystem() : buildSystemPrompt();
   var url = "https://generativelanguage.googleapis.com/v1beta/models/"+geminiModel()+":generateContent?key="+encodeURIComponent(state.settings.apiKey);
@@ -1044,7 +1074,14 @@ function viewSettings(){
     ["complex","Mély — Opus"]
   ];
   var qopts = quals.map(function(m){ return '<option value="'+m[0]+'"'+(s.quality===m[0]?" selected":"")+'>'+m[1]+'</option>'; }).join("");
-  var provider = s.provider || "gemini";
+  var provider = s.provider || "openrouter";
+  var keyPlaceholder = { openrouter:"sk-or-…", gemini:"AIza…", claude:"sk-ant-…" }[provider] || "";
+  var keyLabel = { openrouter:"OpenRouter API-kulcs", gemini:"Gemini API-kulcs", claude:"Anthropic API-kulcs" }[provider] || "API-kulcs";
+  var keyHelp = {
+    openrouter:'Ingyenes és egyszerű, Google Cloud nélkül: regisztrálj a <a class="link" href="https://openrouter.ai" target="_blank" rel="noopener">openrouter.ai</a>-n, majd <a class="link" href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter.ai/keys</a> → <b>Create Key</b> → másold ide. Ingyenes modellt használ.',
+    gemini:'Ingyenes, de Google Cloud projekt kell hozzá: <a class="link" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.',
+    claude:'Fizetős. Kulcs: <a class="link" href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.'
+  }[provider] || "";
   var themes=[["system","Rendszer"],["light","Világos"],["dark","Sötét"]];
   var topts = themes.map(function(m){return '<option value="'+m[0]+'"'+(s.theme===m[0]?" selected":"")+'>'+m[1]+'</option>';}).join("");
 
@@ -1060,16 +1097,13 @@ function viewSettings(){
             + '<div class="d" style="margin-bottom:10px">Ha az appot <b>saját tárhelyről</b> (pl. GitHub) használod, a fenti fiókos mód nem elérhető — itt adhatsz meg egy kulcsot az élő AI-hoz.</div>'
             + '<label class="field">AI szolgáltató</label>'
             + '<select id="provider" style="width:100%">'
+              + '<option value="openrouter"'+(provider==="openrouter"?" selected":"")+'>OpenRouter — ingyenes, ajánlott</option>'
               + '<option value="gemini"'+(provider==="gemini"?" selected":"")+'>Google Gemini — ingyenes</option>'
               + '<option value="claude"'+(provider==="claude"?" selected":"")+'>Anthropic Claude — fizetős</option>'
             + '</select>'
-            + '<label class="field" style="margin-top:12px">'+(provider==="gemini"?"Gemini API-kulcs":"Anthropic API-kulcs")+'</label>'
-            + '<input type="text" id="apiKey" placeholder="'+(provider==="gemini"?"AIza…":"sk-ant-…")+'" value="'+esc(s.apiKey)+'" autocomplete="off" autocapitalize="off" spellcheck="false">'
-            + '<div class="d" style="margin-top:6px">'
-              + (provider==="gemini"
-                  ? 'Ingyenes kulcs, bankkártya nélkül: <a class="link" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. Ezzel a GitHub-verzióban is ingyen szólal meg az AI.'
-                  : 'Fizetős. Kulcs: <a class="link" href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.')
-            + '</div>'
+            + '<label class="field" style="margin-top:12px">'+keyLabel+'</label>'
+            + '<input type="text" id="apiKey" placeholder="'+keyPlaceholder+'" value="'+esc(s.apiKey)+'" autocomplete="off" autocapitalize="off" spellcheck="false">'
+            + '<div class="d" style="margin-top:6px">'+keyHelp+'</div>'
             + '</div></details>'
         ) : '')
     + '</div>'
