@@ -893,7 +893,7 @@ function callAI(situation, mode){
     },
     body: JSON.stringify({
       model: qualityModel(),
-      max_tokens: 1024,
+      max_tokens: 2048,
       system: mode==="biz" ? buildBizSystem() : buildSystemPrompt(),
       messages:[{ role:"user", content: situation }]
     })
@@ -933,7 +933,7 @@ function callOpenRouter(situation, mode){
   var msgs = [ { role:"system", content: sys }, { role:"user", content: situation } ];
   var models = orModels();
   var tryOne = function(i){
-    return orFetch(models[i], msgs, 1024).catch(function(e){
+    return orFetch(models[i], msgs, 2048).catch(function(e){
       if(i+1 < models.length) return tryOne(i+1);
       throw e;
     });
@@ -949,7 +949,7 @@ function callGemini(situation, mode){
     body: JSON.stringify({
       system_instruction:{ parts:[{ text: sys }] },
       contents:[{ role:"user", parts:[{ text: situation }] }],
-      generationConfig:{ maxOutputTokens:1024, temperature:0.9 }
+      generationConfig:{ maxOutputTokens:2048, temperature:0.9 }
     })
   }).then(function(res){
     if(!res.ok){ return res.text().then(function(t){ throw new Error("HTTP "+res.status+" "+t); }); }
