@@ -258,7 +258,7 @@
 /* ============ persistence ============ */
 var LS_KEY = "legjobb_enem_v1";
 function loadState(){
-  var base = { profile:null, biz:null, history:[], actions:[], settings:{ aiEnabled:false, apiKey:"", quality:"default", theme:"system" } };
+  var base = { profile:null, biz:null, history:[], actions:[], settings:{ aiEnabled:false, provider:"gemini", apiKey:"", quality:"default", theme:"system" } };
   try{
     var raw = localStorage.getItem(LS_KEY);
     if(raw){ var p = JSON.parse(raw); return Object.assign(base, p, { settings: Object.assign(base.settings, p.settings||{}) }); }
@@ -769,16 +769,27 @@ function buildPrompt(situation){
 /* AI-t kérő JSON hívás (ékezet-javításhoz): sample -> API -> hiba */
 function callJSON(input){
   return new Promise(function(resolve, reject){
+    var parseJSON = function(text){ var m=text.match(/\{[\s\S]*\}/); if(!m) throw new Error("parse"); return JSON.parse(m[0]); };
     var apiJSON = function(){
       if(!state.settings.apiKey){ var er=new Error("no-ai"); er._msg="Ehhez élő AI kell — kapcsold be a Beállításokban"; reject(er); return; }
+      if(providerName()==="gemini"){
+        var url = "https://generativelanguage.googleapis.com/v1beta/models/"+geminiModel()+":generateContent?key="+encodeURIComponent(state.settings.apiKey);
+        fetch(url, { method:"POST", headers:{ "content-type":"application/json" },
+          body: JSON.stringify({ contents:[{ role:"user", parts:[{ text: input }] }], generationConfig:{ responseMimeType:"application/json", maxOutputTokens:2000 } })
+        }).then(function(res){ if(!res.ok) throw new Error("http"); return res.json(); }).then(function(data){
+          var c=data.candidates&&data.candidates[0];
+          var text=(c&&c.content&&c.content.parts)?c.content.parts.map(function(p){return p.text||"";}).join(""):"";
+          resolve(parseJSON(text));
+        }, function(){ var er=new Error("api"); er._msg="AI hiba a javításnál"; reject(er); });
+        return;
+      }
       fetch("https://api.anthropic.com/v1/messages",{
         method:"POST",
         headers:{ "content-type":"application/json", "x-api-key":state.settings.apiKey, "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" },
         body: JSON.stringify({ model: qualityModel(), max_tokens:1500, messages:[{ role:"user", content: input + "\n\nKizárólag a JSON objektumot add vissza." }] })
       }).then(function(res){ if(!res.ok) throw new Error("http"); return res.json(); }).then(function(data){
         var text=(data.content||[]).map(function(c){return c.text||"";}).join("");
-        var m=text.match(/\{[\s\S]*\}/); if(!m) throw new Error("parse");
-        resolve(JSON.parse(m[0]));
+        resolve(parseJSON(text));
       }, function(){ var er=new Error("api"); er._msg="AI hiba a javításnál"; reject(er); });
     };
     if(window.claude && typeof window.claude.use==="function"){
@@ -816,8 +827,10 @@ function getAI(situation, mode){
   var promptText = mode==="biz" ? buildBizPrompt(situation) : buildPrompt(situation);
   return new Promise(function(resolve, reject){
     var tryApi = function(){
-      if(state.settings.apiKey){ callAI(situation, mode).then(resolve, function(e){ var er=new Error("api"); er._msg="AI hiba — offline válasz"; reject(er); }); }
-      else { var er=new Error("no-ai"); reject(er); }
+      if(state.settings.apiKey){
+        var fn = providerName()==="gemini" ? callGemini : callAI;
+        fn(situation, mode).then(resolve, function(e){ var er=new Error("api"); er._msg="AI hiba — offline válasz"; reject(er); });
+      } else { var er=new Error("no-ai"); reject(er); }
     };
     if(window.claude && typeof window.claude.use === "function"){
       window.claude.use("sample").then(function(sample){
@@ -875,6 +888,29 @@ function callAI(situation, mode){
     return res.json();
   }).then(function(data){
     var text = (data.content||[]).map(function(c){return c.text||"";}).join("").trim();
+    if(!text) throw new Error("üres válasz");
+    return text;
+  });
+}
+function providerName(){ return state.settings.provider || "gemini"; }
+function geminiModel(){ return "gemini-2.0-flash"; }
+function callGemini(situation, mode){
+  var sys = mode==="biz" ? buildBizSystem() : buildSystemPrompt();
+  var url = "https://generativelanguage.googleapis.com/v1beta/models/"+geminiModel()+":generateContent?key="+encodeURIComponent(state.settings.apiKey);
+  return fetch(url, {
+    method:"POST",
+    headers:{ "content-type":"application/json" },
+    body: JSON.stringify({
+      system_instruction:{ parts:[{ text: sys }] },
+      contents:[{ role:"user", parts:[{ text: situation }] }],
+      generationConfig:{ maxOutputTokens:1024, temperature:0.9 }
+    })
+  }).then(function(res){
+    if(!res.ok){ return res.text().then(function(t){ throw new Error("HTTP "+res.status+" "+t); }); }
+    return res.json();
+  }).then(function(data){
+    var c = data.candidates && data.candidates[0];
+    var text = (c && c.content && c.content.parts) ? c.content.parts.map(function(p){return p.text||"";}).join("").trim() : "";
     if(!text) throw new Error("üres válasz");
     return text;
   });
@@ -1008,6 +1044,7 @@ function viewSettings(){
     ["complex","Mély — Opus"]
   ];
   var qopts = quals.map(function(m){ return '<option value="'+m[0]+'"'+(s.quality===m[0]?" selected":"")+'>'+m[1]+'</option>'; }).join("");
+  var provider = s.provider || "gemini";
   var themes=[["system","Rendszer"],["light","Világos"],["dark","Sötét"]];
   var topts = themes.map(function(m){return '<option value="'+m[0]+'"'+(s.theme===m[0]?" selected":"")+'>'+m[1]+'</option>';}).join("");
 
@@ -1018,11 +1055,21 @@ function viewSettings(){
       + (s.aiEnabled ? (
           '<div class="set-row"><div><div class="k">Minőség</div><div class="d">Gyorsabb vagy mélyebb válasz</div></div><select id="quality">'+qopts+'</select></div>'
           + '<div class="note" style="margin-top:12px">Amikor az appot a <b>claude.ai linkről</b> használod, a saját Claude-fiókod adja a választ — <b>nincs külön díj</b> és nem kell API-kulcs, a szokásos Claude-használati kereteden belül működik. Első alkalommal a Claude engedélyt kér.</div>'
-          + '<details style="margin-top:12px"><summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--ink-soft);padding:4px 0">Haladó: saját API-kulcs</summary>'
+          + '<details style="margin-top:12px"'+(state.settings.apiKey?" open":"")+'><summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--ink-soft);padding:4px 0">Saját API-kulcs (a hosztolt / GitHub verzióhoz)</summary>'
             + '<div style="margin-top:10px">'
-            + '<label class="field">Anthropic API-kulcs (nem kötelező)</label>'
-            + '<input type="text" id="apiKey" placeholder="sk-ant-…" value="'+esc(s.apiKey)+'" autocomplete="off" autocapitalize="off" spellcheck="false">'
-            + '<div class="d" style="margin-top:6px">Csak akkor kell, ha az appot <b>saját fájlként vagy saját tárhelyen</b> futtatod (nem a claude.ai linkről). A claude.ai appban a fenti, fiókos mód működik — kulcs nélkül.</div>'
+            + '<div class="d" style="margin-bottom:10px">Ha az appot <b>saját tárhelyről</b> (pl. GitHub) használod, a fenti fiókos mód nem elérhető — itt adhatsz meg egy kulcsot az élő AI-hoz.</div>'
+            + '<label class="field">AI szolgáltató</label>'
+            + '<select id="provider" style="width:100%">'
+              + '<option value="gemini"'+(provider==="gemini"?" selected":"")+'>Google Gemini — ingyenes</option>'
+              + '<option value="claude"'+(provider==="claude"?" selected":"")+'>Anthropic Claude — fizetős</option>'
+            + '</select>'
+            + '<label class="field" style="margin-top:12px">'+(provider==="gemini"?"Gemini API-kulcs":"Anthropic API-kulcs")+'</label>'
+            + '<input type="text" id="apiKey" placeholder="'+(provider==="gemini"?"AIza…":"sk-ant-…")+'" value="'+esc(s.apiKey)+'" autocomplete="off" autocapitalize="off" spellcheck="false">'
+            + '<div class="d" style="margin-top:6px">'
+              + (provider==="gemini"
+                  ? 'Ingyenes kulcs, bankkártya nélkül: <a class="link" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. Ezzel a GitHub-verzióban is ingyen szólal meg az AI.'
+                  : 'Fizetős. Kulcs: <a class="link" href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.')
+            + '</div>'
             + '</div></details>'
         ) : '')
     + '</div>'
@@ -1056,6 +1103,7 @@ function bindSettings(){
   var s = state.settings;
   $("#aiToggle").onclick=function(){ s.aiEnabled=!s.aiEnabled; save(); render(); };
   var ak=$("#apiKey"); if(ak) ak.oninput=function(){ s.apiKey=ak.value.trim(); save(); };
+  var pv=$("#provider"); if(pv) pv.onchange=function(){ s.provider=pv.value; save(); render(); };
   var ql=$("#quality"); if(ql) ql.onchange=function(){ s.quality=ql.value; save(); };
   var eb=$("#editBiz"); if(eb) eb.onclick=function(){ bizDraft = state.biz?Object.assign({},state.biz):{}; view="bizintake"; render(); };
   var th=$("#theme"); if(th) th.onchange=function(){ s.theme=th.value; save(); applyTheme(); };
