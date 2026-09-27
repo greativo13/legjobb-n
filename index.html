@@ -1974,6 +1974,7 @@ function viewSettings(){
             + '</select>'
             + '<label class="field" style="margin-top:12px">'+keyLabel+'</label>'
             + '<input type="text" id="apiKey" placeholder="'+keyPlaceholder+'" value="'+esc(s.apiKey)+'" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">'
+            + '<div id="keyWarn" class="d" style="margin-top:6px;color:var(--danger);font-weight:700">'+esc(keyWarning(provider, s.apiKey))+'</div>'
             + '<div class="d" style="margin-top:6px">'+keyHelp+'</div>'
             + '</div></details>'
         ) : '')
@@ -2018,7 +2019,10 @@ function viewSettings(){
 function bindSettings(){
   var s = state.settings;
   $("#aiToggle").onclick=function(){ s.aiEnabled=!s.aiEnabled; save(); render(); };
-  var ak=$("#apiKey"); if(ak) ak.oninput=function(){ s.apiKey=ak.value.trim(); save(); };
+  var ak=$("#apiKey"); if(ak) ak.oninput=function(){
+    s.apiKey=ak.value.replace(/\s+/g,""); save(); // a beillesztéskor bekerült szóközök/sortörések nélkül
+    var w=$("#keyWarn"); if(w) w.textContent=keyWarning(s.provider||"openrouter", s.apiKey);
+  };
   var pv=$("#provider"); if(pv) pv.onchange=function(){ s.provider=pv.value; save(); render(); };
   var ql=$("#quality"); if(ql) ql.onchange=function(){ s.quality=ql.value; save(); };
   var eb=$("#editBiz"); if(eb) eb.onclick=function(){ bizDraft = state.biz?Object.assign({},state.biz):{}; view="bizintake"; render(); };
@@ -2049,6 +2053,17 @@ function bindSettings(){
       state = loadState(); view="intro"; tab="self"; editing=false; compass={input:"",result:null,loading:false,mode:"self",fuDraft:"",fuLoading:false}; orLast=null; goalsUI={adding:false,sug:null,sugLoading:false}; routineDraft={}; reviewLoading=false; scheduleReminder(); render();
     }
   };
+}
+// azonnali figyelmeztetés rossz formátumú vagy rövidített (pontozott) kulcsnál
+function keyWarning(provider, key){
+  key=String(key||"");
+  if(!key) return "";
+  if(/\.\.\.|…|\*/.test(key)) return "Ez a kulcs rövidített (pontozott) változata — így nem működik. Hozz létre új kulcsot, és a teljeset másold be, rögtön a létrehozás után.";
+  if(provider==="openrouter" && !/^sk-or-/.test(key)) return "Az OpenRouter-kulcs „sk-or-” kezdetű. Ez nem annak tűnik.";
+  if(provider==="openrouter" && key.length<60) return "Ez a kulcs túl rövidnek tűnik — lehet, hogy nem a teljeset másoltad ki.";
+  if(provider==="gemini" && !/^AIza/.test(key)) return "A Gemini-kulcs „AIza” kezdetű. Ez nem annak tűnik.";
+  if(provider==="claude" && !/^sk-ant-/.test(key)) return "Az Anthropic-kulcs „sk-ant-” kezdetű. Ez nem annak tűnik.";
+  return "";
 }
 function copyText(text, msg){
   if(navigator.clipboard && navigator.clipboard.writeText){
