@@ -1434,7 +1434,10 @@ function renderResult(r){
     if(r.quote) body += '<div class="rblock"><div class="quote">'+safeHtml(r.quote)+'<span class="who">— '+esc(name())+'</span></div></div>';
   }
   if(r._aiError){
-    body = '<div class="rblock" style="background:color-mix(in srgb,var(--danger) 10%, transparent);border:1px solid color-mix(in srgb,var(--danger) 30%, transparent);border-radius:10px;padding:11px 12px"><div class="h" style="color:var(--danger);margin-bottom:5px">Az élő AI most nem válaszolt</div><p style="font-size:12.5px;color:var(--ink-soft);white-space:pre-wrap;word-break:break-word">'+esc(r._aiError)+'</p></div>' + body;
+    body = '<div class="rblock" style="background:color-mix(in srgb,var(--danger) 10%, transparent);border:1px solid color-mix(in srgb,var(--danger) 30%, transparent);border-radius:10px;padding:11px 12px"><div class="h" style="color:var(--danger);margin-bottom:5px">Az élő AI most nem válaszolt</div><p style="font-size:12.5px;color:var(--ink-soft);white-space:pre-wrap;word-break:break-word">'+esc(r._aiError)+'</p><button class="btn small ghost" data-go-ai style="margin-top:10px">Beállítás megnyitása</button></div>' + body;
+  } else if(!r.ai && !state.settings.aiEnabled){
+    // ha az élő AI ki van kapcsolva, ne higgye a felhasználó, hogy „elromlott" — mondjuk meg, és vigyük oda
+    body += '<div class="note" style="margin-top:14px">Ez az offline útmutató (a saját szavaidból). Az <b>élő AI</b> most ki van kapcsolva.<br><button class="btn small ghost" data-go-ai style="margin-top:8px">Élő AI bekapcsolása</button></div>';
   }
   var foot;
   if(r._done){
@@ -1476,6 +1479,7 @@ function bindCompass(){
   };
   var spk=$("#speakBtn"); if(spk){ updateSpeakBtn(); spk.onclick=function(){ toggleSpeak(plainResultText(compass.result)); }; }
   var shr=$("#shareBtn"); if(shr) shr.onclick=function(){ if(compass.result) shareResult(compass.result); };
+  document.querySelectorAll("[data-go-ai]").forEach(function(b){ b.onclick=function(){ tab="settings"; render(); }; });
   document.querySelectorAll("[data-hist]").forEach(function(b){
     b.onclick=function(){
       var h = state.history.filter(function(x){return x.id===b.getAttribute("data-hist");})[0];
@@ -1538,7 +1542,8 @@ function askCompass(){
     }, function(err){
       compass.loading=false;
       var r = offline();
-      if(err && err._msg && err.message!=="no-ai") r._aiError = err._msg;
+      if(err && err.message==="no-ai") r._aiError = "Az élő AI be van kapcsolva, de nincs megadva API-kulcs (lehet, hogy a telefon törölte, amikor újra kitetted az ikont). Add meg újra: Beállítás → Élő AI válaszok → Saját API-kulcs.";
+      else if(err && err._msg) r._aiError = err._msg;
       compass.result=r;
       pushHistory(q, r, false, mode);
       render(); scrollToResult();
@@ -1666,6 +1671,8 @@ function aiErrorText(e){
   if(st===402) return "Nincs elég kredit (402). Ingyenes modelleknél ez általában azt jelenti, hogy elfogyott a napi keret — próbáld később.";
   if(st===429) return "Túl sok kérés, vagy elfogyott a napi ingyenes keret (429). Próbáld újra kicsit később.";
   if(/Failed to fetch|NetworkError|Load failed|network/i.test(raw)) return "Nincs internetkapcsolat, vagy a szolgáltató most nem érhető el.";
+  if(/data policy|privacy|guardrail|training/i.test(raw)) return "Az OpenRouter adatvédelmi beállítása letiltja az ingyenes modelleket. Nyisd meg: openrouter.ai/settings/privacy → engedélyezd az ingyenes modelleket (free models / model training) → mentsd, majd próbáld újra.";
+  if(st===404 || /No endpoints found|not a valid model|model.*not found/i.test(raw)) return "Most egyik ingyenes modell sem érhető el ("+(st||"404")+"). Próbáld újra pár perc múlva.";
   return raw;
 }
 function pushHistory(input, result, ai, mode){
@@ -1956,7 +1963,7 @@ function viewSettings(){
       + (s.aiEnabled ? (
           '<div class="set-row"><div><div class="k">Minőség</div><div class="d">Gyorsabb vagy mélyebb válasz</div></div><select id="quality">'+qopts+'</select></div>'
           + '<div class="note" style="margin-top:12px">Amikor az appot a <b>claude.ai linkről</b> használod, a saját Claude-fiókod adja a választ — <b>nincs külön díj</b> és nem kell API-kulcs, a szokásos Claude-használati kereteden belül működik. Első alkalommal a Claude engedélyt kér.</div>'
-          + '<details style="margin-top:12px"'+(state.settings.apiKey?" open":"")+'><summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--ink-soft);padding:4px 0">Saját API-kulcs (a hosztolt / GitHub verzióhoz)</summary>'
+          + '<details style="margin-top:12px"'+((state.settings.apiKey || !window.claude)?" open":"")+'><summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--ink-soft);padding:4px 0">Saját API-kulcs (a hosztolt / GitHub verzióhoz)</summary>'
             + '<div style="margin-top:10px">'
             + '<div class="d" style="margin-bottom:10px">Ha az appot <b>saját tárhelyről</b> (pl. GitHub) használod, a fenti fiókos mód nem elérhető — itt adhatsz meg egy kulcsot az élő AI-hoz.</div>'
             + '<label class="field">AI szolgáltató</label>'
