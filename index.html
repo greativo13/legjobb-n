@@ -61,10 +61,16 @@
     font-family:var(--sans); font-size:16px; line-height:1.5;
     -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
   }
+  /* A váz a képernyő széleihez rögzül (nem %-os magassághoz): iOS kezdőképernyős módban,
+     áttetsző állapotsornál a 100%-os magasság rövidebb lehet a kijelzőnél, és alul csík maradna.
+     A biztonsági sávokat (notch, home-indikátor) maga a váz kezeli. */
   #app{
-    max-width:540px; margin:0 auto; height:100%;
-    display:flex; flex-direction:column; position:relative;
+    position:fixed; top:0; bottom:0; left:0; right:0;
+    max-width:540px; margin:0 auto;
+    display:flex; flex-direction:column;
     background:var(--bg);
+    padding-top:env(safe-area-inset-top,0px);
+    padding-bottom:env(safe-area-inset-bottom,0px);
   }
 
   /* ---------- shared bits ---------- */
@@ -150,10 +156,14 @@
   .iconbtn{background:none; border:1px solid var(--line); border-radius:10px; width:38px; height:38px; display:grid; place-items:center; color:var(--ink-soft);}
 
   .tabbar{
+    position:relative;
     display:flex; background:var(--surface); border-top:1px solid var(--line);
     padding:6px 8px max(6px, env(safe-area-inset-bottom,0px));
     margin-bottom: calc(-1 * env(safe-area-inset-bottom,0px));
   }
+  /* tartalék: ha a rendszer mégis rövidebbnek mérné a kijelzőt, a menüsáv színe tölti ki a maradékot */
+  .tabbar::after{content:""; position:absolute; left:0; right:0; top:100%; height:140px; background:var(--surface); pointer-events:none;}
+  .topbar::before{content:""; position:absolute; left:0; right:0; bottom:100%; height:140px; background:var(--bg); pointer-events:none;}
   .tabbar button{
     flex:1; background:none; border:none; color:var(--ink-faint); font-size:11.5px; font-weight:700;
     display:flex; flex-direction:column; align-items:center; gap:3px; padding:4px 4px; border-radius:12px; letter-spacing:.02em;
