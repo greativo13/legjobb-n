@@ -520,12 +520,22 @@ function viewIntro(){
       + istep("3","Iránytűként használod","Motiválatlan vagy, céltalan, vagy döntés előtt állsz? Leírod — és megmondja, mit tenne most ő a helyedben.")
     + '</div>'
     + '<button class="btn" id="start">Kezdjük el</button>'
+    + '<button class="btn ghost" id="introImport" style="margin-top:10px">Van mentésem — betöltés fájlból</button>'
+    + '<input type="file" id="introFile" accept="application/json,.json" hidden>'
     + '<p class="faint" style="text-align:center;font-size:13px;margin-top:14px">Minden a te telefonodon marad.</p>'
     + '</div></div>';
 }
 function istep(n,t,p){ return '<div class="istep"><div class="n">'+n+'</div><div><b>'+t+'</b><p>'+p+'</p></div></div>'; }
 function bindIntro(){
   $("#start").onclick = function(){ draft = state.profile ? Object.assign({},state.profile) : {}; qIndex=0; view="onboarding"; render(); };
+  $("#introImport").onclick = function(){ $("#introFile").click(); };
+  $("#introFile").onchange = function(e){
+    var f = e.target.files && e.target.files[0]; if(!f) return;
+    var rd = new FileReader();
+    rd.onload = function(){ importBackup(rd.result); };
+    rd.onerror = function(){ toast("Nem sikerült megnyitni a fájlt"); };
+    rd.readAsText(f);
+  };
 }
 
 /* ---------- onboarding ---------- */
@@ -543,7 +553,7 @@ function viewOnboarding(){
   return '<div class="screen"><div class="qwrap">'
     + '<div class="progress"><i style="width:'+pct+'%"></i></div>'
     + '<div class="qhead" style="margin-top:14px"><span>'+(qIndex+1)+' / '+QUESTIONS.length+'</span>'
-      + '<button class="backlink" id="skip">Kihagyom ›</button></div>'
+      + '<span>'+(state.profile ? '<button class="backlink" id="obCancel">Mégse</button>' : '')+'<button class="backlink" id="skip">Kihagyom ›</button></span></div>'
     + '<div class="qcard">'
       + '<div class="dimtag">'+esc(q.dim)+'</div>'
       + '<h2>'+esc(q.q)+'</h2>'
@@ -572,6 +582,7 @@ function bindOnboarding(){
   });
   var prev=$("#prev"); if(prev) prev.onclick=function(){ qIndex--; render(); };
   $("#skip").onclick = function(){ nextQ(); };
+  var oc=$("#obCancel"); if(oc) oc.onclick=function(){ if(confirm("Kilépsz? Az ebben a körben írt változtatások nem mentődnek.")){ draft={}; view="app"; tab="self"; render(); } };
   $("#next").onclick = function(){ nextQ(); };
 }
 function nextQ(){
@@ -634,7 +645,7 @@ function bindBizIntake(){
   $("#bizSave").onclick=function(){
     state.biz = Object.assign({ _created:(state.biz&&state.biz._created)||Date.now() }, bizDraft, { _updated:Date.now() });
     save();
-    view="app"; tab="compass"; compass.mode="biz"; compass.result=null; render();
+    view="app"; if(tab==="compass"){ compass.mode="biz"; compass.result=null; } render();
     toast("Vállalkozás-profil elmentve");
   };
 }
@@ -705,7 +716,11 @@ function tabBtn(id,label,ic){
 }
 function bindApp(){
   document.querySelectorAll("[data-tab]").forEach(function(b){
-    b.onclick=function(){ tab=b.getAttribute("data-tab"); render(); };
+    b.onclick=function(){
+      var t=b.getAttribute("data-tab");
+      if(editing && t!=="self"){ if(state.profile){ state.profile._updated=Date.now(); save(); } editing=false; }
+      tab=t; render();
+    };
   });
   if(tab==="self") bindSelf();
   if(tab==="compass") bindCompass();
@@ -885,12 +900,13 @@ function bindGoals(){
   }; });
   document.querySelectorAll("[data-g-dec]").forEach(function(b){ b.onclick=function(){
     var g=findGoal(b.getAttribute("data-g-dec")); if(!g) return;
+    if((g.current||0)>0) undoDone("Cél: "+g.title);
     g.current=Math.max(0,(g.current||0)-1); save(); render();
   }; });
   document.querySelectorAll("[data-g-step]").forEach(function(b){ b.onclick=function(){
     var p=b.getAttribute("data-g-step").split("|"), g=findGoal(p[0]); if(!g || !g.steps || !g.steps[+p[1]]) return;
     var st=g.steps[+p[1]]; st.d=!st.d;
-    if(st.d) markDone({ mode:"goal", input:"Mérföldkő: "+st.t });
+    if(st.d) markDone({ mode:"goal", input:"Mérföldkő: "+st.t }); else undoDone("Mérföldkő: "+st.t);
     if(!g.target && !g.done && g.steps.every(function(x){ return x.d; })){ completeGoal(g, "Minden mérföldkő kész"); return; }
     save(); render();
   }; });
@@ -982,10 +998,11 @@ function bindKpi(){
     var rev=numOrNull($("#kRev").value), cli=numOrNull($("#kCli").value);
     if(rev===null && cli===null){ toast("Írj be legalább egy számot"); return; }
     var wk=isoWeek(), k=kpiFor(wk);
+    var isNew=!k;
     if(!k){ k={ wk:wk }; state.bizLog.push(k); }
     k.revenue=rev; k.clients=cli; k.at=Date.now();
     state.bizLog.sort(function(a,b){ return a.wk<b.wk ? -1 : 1; }); state.bizLog=state.bizLog.slice(-52);
-    markDone({ mode:"biz", input:"Heti üzleti számok rögzítve" });
+    if(isNew) markDone({ mode:"biz", input:"Heti üzleti számok rögzítve" });
     save(); render(); toast("Heti számok mentve");
   };
 }
@@ -1152,7 +1169,7 @@ function viewSelf(){
     }
   }
   SECTIONS.forEach(function(sec){
-    var qs = QUESTIONS.filter(function(q){ return q.sec===sec.key && q.id!=="name" && q.id!=="horizon"; });
+    var qs = QUESTIONS.filter(function(q){ return q.sec===sec.key && (editing || (q.id!=="name" && q.id!=="horizon")); });
     if(!qs.length) return;
     out += '<div class="sec-title"><span class="k">'+String(SECTIONS.indexOf(sec)+1).padStart(2,"0")+'</span><h3>'+esc(sec.label)+'</h3></div>';
     out += '<div class="card">';
@@ -1472,7 +1489,7 @@ function bindCompass(){
   var fs=$("#fuSend"); if(fs) fs.onclick=sendFollowUp;
   var mk=$("#markDone");
   if(mk) mk.onclick=function(){
-    markDone({ mode:compass.mode, input:compass.input });
+    markDone({ mode:compass.mode, input:(compass.result && compass.result.q) || compass.input });
     if(compass.result){ compass.result._done=true; save(); }
     render();
     toast("Szép munka — a jövőbeli éned büszke rád 🔥");
@@ -1490,6 +1507,10 @@ function bindCompass(){
 
 /* ---------- streak / actions / daily ---------- */
 function dayKey(ts){ var d=new Date(ts); return d.getFullYear()+"-"+(d.getMonth()+1)+"-"+d.getDate(); }
+function undoDone(input){ // a ma rögzített, azonos szövegű legutóbbi lépés törlése
+  var today=dayKey(Date.now()), a=state.actions||[];
+  for(var i=0;i<a.length;i++){ if(dayKey(a[i].at)!==today) break; if(a[i].input===input){ a.splice(i,1); return; } }
+}
 function markDone(ctx){
   state.actions = state.actions || [];
   var item = { at:Date.now() };
@@ -1561,7 +1582,7 @@ function askCompass(){
 /* getAI: 1) Claude-fiók a claude.ai appban (sample, ingyenes), 2) saját API-kulcs, 3) offline */
 function qualityTier(){ return state.settings.quality || "default"; }
 function qualityModel(){
-  return { quick:"claude-haiku-4-5-20251001", "default":"claude-sonnet-5", complex:"claude-opus-5" }[qualityTier()] || "claude-sonnet-5";
+  return { quick:"claude-haiku-5-5", "default":"claude-sonnet-5-5", complex:"claude-opus-5-5" }[qualityTier()] || "claude-sonnet-5-5";
 }
 
 /* AI-t kérő JSON hívás (ékezet-javításhoz): sample -> API -> hiba */
@@ -1729,7 +1750,7 @@ function callAI(sys, turns){
   });
 }
 function providerName(){ return state.settings.provider || "openrouter"; }
-function geminiModel(){ return "gemini-2.0-flash"; }
+function geminiModel(){ return "gemini-flash-latest"; } // a 2.0 Flash 2026 júniusában megszűnt
 // Az OpenRouter ingyenes kínálata hetente változik — ez csak a kiinduló lista, a többit az élő lista pótolja (orChat)
 function orModels(){
   if(qualityTier()==="quick") return ["google/gemma-4-26b-a4b-it:free","nvidia/nemotron-3.5-lightning:free","google/gemma-4-31b-it:free"];
@@ -1962,7 +1983,7 @@ function viewSettings(){
         + '<button class="switch '+(s.aiEnabled?"on":"")+'" id="aiToggle"><i></i></button></div>'
       + (s.aiEnabled ? (
           '<div class="set-row"><div><div class="k">Minőség</div><div class="d">Gyorsabb vagy mélyebb válasz</div></div><select id="quality">'+qopts+'</select></div>'
-          + '<div class="note" style="margin-top:12px">Amikor az appot a <b>claude.ai linkről</b> használod, a saját Claude-fiókod adja a választ — <b>nincs külön díj</b> és nem kell API-kulcs, a szokásos Claude-használati kereteden belül működik. Első alkalommal a Claude engedélyt kér.</div>'
+          + (window.claude ? '<div class="note" style="margin-top:12px">Amikor az appot a <b>claude.ai linkről</b> használod, a saját Claude-fiókod adja a választ — <b>nincs külön díj</b> és nem kell API-kulcs, a szokásos Claude-használati kereteden belül működik. Első alkalommal a Claude engedélyt kér.</div>' : '')
           + '<details style="margin-top:12px"'+((state.settings.apiKey || !window.claude)?" open":"")+'><summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--ink-soft);padding:4px 0">Saját API-kulcs (a hosztolt / GitHub verzióhoz)</summary>'
             + '<div style="margin-top:10px">'
             + '<div class="d" style="margin-bottom:10px">Ha az appot <b>saját tárhelyről</b> (pl. GitHub) használod, a fenti fiókos mód nem elérhető — itt adhatsz meg egy kulcsot az élő AI-hoz.</div>'
