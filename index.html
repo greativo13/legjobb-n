@@ -114,11 +114,12 @@
   .chip.on{background:var(--accent); border-color:var(--accent); color:#fff;}
 
   /* ---------- intro ---------- */
-  .intro{min-height:100%; display:flex; flex-direction:column; justify-content:center; padding:40px 26px;}
+  .intro{min-height:100%; display:flex; flex-direction:column; justify-content:center; padding:24px 24px;}
   .halo{width:96px; height:96px; margin:0 auto 26px; display:block;}
+  .intro .halo{width:72px; height:72px; margin-bottom:16px;}
   .intro h1{font-size:clamp(32px,9vw,44px); line-height:1.02; text-align:center;}
   .intro .lede{text-align:center; color:var(--ink-soft); font-size:17px; margin:16px auto 0; max-width:33ch;}
-  .intro .steps{margin:30px 0 34px; display:flex; flex-direction:column; gap:14px;}
+  .intro .steps{margin:22px 0 24px; display:flex; flex-direction:column; gap:11px;}
   .istep{display:flex; gap:14px; align-items:flex-start;}
   .istep .n{font-family:var(--serif); font-weight:600; color:var(--accent); font-size:19px; width:26px; flex:none; line-height:1.35;}
   .istep b{font-weight:700;}
@@ -354,8 +355,8 @@
 /* ============ persistence ============ */
 var LS_KEY = "legjobb_enem_v1";
 function loadState(){
-  var base = { profile:null, biz:null, history:[], actions:[], goals:[], checkins:{}, reviews:[], bizLog:[],
-    settings:{ aiEnabled:false, provider:"openrouter", apiKey:"", quality:"default", theme:"system", reminderOn:false, reminderTime:"08:00", lastReminded:"", lastBackup:0, backupSnooze:0 } };
+  var base = { profile:null, biz:null, history:[], actions:[], goals:[], checkins:{}, reviews:[], bizLog:[], dailyAI:null,
+    settings:{ aiEnabled:false, provider:"openrouter", apiKey:"", quality:"default", theme:"system", reminderOn:false, reminderTime:"08:00", lastReminded:"", lastBackup:0, backupSnooze:0, reviewSnooze:0 } };
   try{
     var raw = localStorage.getItem(LS_KEY);
     if(raw){
@@ -519,15 +520,17 @@ function viewIntro(){
       + istep("2","Bármikor visszanézed","Egy hely, ahol emlékeztetheted magad, kivé válsz.")
       + istep("3","Iránytűként használod","Motiválatlan vagy, céltalan, vagy döntés előtt állsz? Leírod — és megmondja, mit tenne most ő a helyedben.")
     + '</div>'
-    + '<button class="btn" id="start">Kezdjük el</button>'
-    + '<button class="btn ghost" id="introImport" style="margin-top:10px">Van mentésem — betöltés fájlból</button>'
+    + '<div class="row"><button class="btn" id="start" style="flex:1.15">Kezdjük el</button>'
+    + '<button class="btn ghost" id="quickStart" style="flex:1;padding-left:8px;padding-right:8px;font-size:15px;white-space:nowrap">Gyors: 5 kérdés</button></div>'
+    + '<button class="backlink" id="introImport" style="display:block;margin:10px auto 0">Van mentésem — betöltés fájlból</button>'
     + '<input type="file" id="introFile" accept="application/json,.json" hidden>'
-    + '<p class="faint" style="text-align:center;font-size:13px;margin-top:14px">Minden a te telefonodon marad.</p>'
+    + '<p class="faint" style="text-align:center;font-size:13px;margin-top:6px">Minden a te telefonodon marad.</p>'
     + '</div></div>';
 }
 function istep(n,t,p){ return '<div class="istep"><div class="n">'+n+'</div><div><b>'+t+'</b><p>'+p+'</p></div></div>'; }
 function bindIntro(){
-  $("#start").onclick = function(){ draft = state.profile ? Object.assign({},state.profile) : {}; qIndex=0; view="onboarding"; render(); };
+  $("#start").onclick = function(){ obQuick=false; draft = state.profile ? Object.assign({},state.profile) : {}; qIndex=0; view="onboarding"; render(); };
+  $("#quickStart").onclick = function(){ obQuick=true; draft = state.profile ? Object.assign({},state.profile) : {}; qIndex=0; view="onboarding"; render(); };
   $("#introImport").onclick = function(){ $("#introFile").click(); };
   $("#introFile").onchange = function(e){
     var f = e.target.files && e.target.files[0]; if(!f) return;
@@ -539,20 +542,23 @@ function bindIntro(){
 }
 
 /* ---------- onboarding ---------- */
+var QUICK_IDS = ["name","horizon","oneline","values","why"];
+var obQuick = false; // gyors indulás: csak 5 kérdés, a többi később kitölthető
+function obQs(){ return obQuick ? QUESTIONS.filter(function(q){ return QUICK_IDS.indexOf(q.id)>=0; }) : QUESTIONS; }
 function viewOnboarding(){
-  var q = QUESTIONS[qIndex];
+  var q = obQs()[qIndex];
   var val = draft[q.id]!=null ? draft[q.id] : "";
-  var pct = Math.round((qIndex)/(QUESTIONS.length)*100);
+  var pct = Math.round((qIndex)/(obQs().length)*100);
   var chips = "";
   if(q.chips){
     chips = '<div class="row wrap" style="margin-bottom:16px">' + q.chips.map(function(c){
       return '<button type="button" class="chip" data-chip="'+esc(c)+'">'+esc(c)+'</button>';
     }).join("") + '</div>';
   }
-  var isLast = qIndex===QUESTIONS.length-1;
+  var isLast = qIndex===obQs().length-1;
   return '<div class="screen"><div class="qwrap">'
     + '<div class="progress"><i style="width:'+pct+'%"></i></div>'
-    + '<div class="qhead" style="margin-top:14px"><span>'+(qIndex+1)+' / '+QUESTIONS.length+'</span>'
+    + '<div class="qhead" style="margin-top:14px"><span>'+(qIndex+1)+' / '+obQs().length+'</span>'
       + '<span>'+(state.profile ? '<button class="backlink" id="obCancel">Mégse</button>' : '')+'<button class="backlink" id="skip">Kihagyom ›</button></span></div>'
     + '<div class="qcard">'
       + '<div class="dimtag">'+esc(q.dim)+'</div>'
@@ -568,7 +574,7 @@ function viewOnboarding(){
     + '</div></div>';
 }
 function bindOnboarding(){
-  var q = QUESTIONS[qIndex];
+  var q = obQs()[qIndex];
   var ta = $("#qa");
   ta.oninput = function(){ draft[q.id] = ta.value; };
   ta.focus();
@@ -586,7 +592,7 @@ function bindOnboarding(){
   $("#next").onclick = function(){ nextQ(); };
 }
 function nextQ(){
-  if(qIndex < QUESTIONS.length-1){ qIndex++; render(); }
+  if(qIndex < obQs().length-1){ qIndex++; render(); }
   else{
     state.profile = Object.assign({ _created: Date.now() }, draft, { _updated: Date.now() });
     save();
@@ -603,6 +609,7 @@ function viewReveal(){
     + '<div class="sig">'+esc(name())+'</div>'
     + (one ? '<p style="font-family:var(--serif);font-size:19px;font-style:italic;color:var(--ink);margin-top:20px;">«'+esc(one)+'»</p>' : '')
     + '<p>Ő az, akivé válsz. Bármikor visszanézheted, és amikor elakadsz, kérj tőle irányt.</p>'
+    + (obQuick ? '<p style="font-size:14px">A részleteket (test, hivatás, szokások, kapcsolatok) bármikor kitöltheted az Énem fülön, a ✎ gombbal — minél többet írsz, annál személyesebb lesz a tanács.</p>' : '')
     + '<div style="margin-top:30px"><button class="btn" id="enter">Belépek</button></div>'
     + '</div></div>';
 }
@@ -738,6 +745,7 @@ function needsBackupNag(){
 }
 function needsReviewNag(){
   var d=new Date().getDay(); if(d!==0 && d!==1) return false;         // vasárnap és hétfő
+  if(Date.now() < (state.settings.reviewSnooze||0)) return false;
   var last=(state.reviews||[])[0];
   if(last && Date.now()-last.at < 5*86400000) return false;
   return (state.actions||[]).length>0 || Object.keys(state.checkins||{}).length>0;
@@ -746,7 +754,7 @@ function nagsHTML(){
   var out="";
   if(needsReviewNag()){
     out += '<div class="nag"><div><b>Új hét kezdődik.</b> Nézd meg, mit léptél az elmúlt 7 napban, és mire figyelj a következő héten.</div>'
-      + '<div class="row"><button class="btn small" id="nagReview">Heti visszatekintés</button></div></div>';
+      + '<div class="row"><button class="btn small" id="nagReview">Heti visszatekintés</button><button class="btn small ghost" id="nagReviewLater">Később</button></div></div>';
   }
   if(needsBackupNag()){
     var days = state.settings.lastBackup ? Math.floor((Date.now()-state.settings.lastBackup)/86400000) : 0;
@@ -757,6 +765,7 @@ function nagsHTML(){
 }
 function bindNags(){
   var r=$("#nagReview"); if(r) r.onclick=function(){ view="journal"; render(); };
+  var rl=$("#nagReviewLater"); if(rl) rl.onclick=function(){ state.settings.reviewSnooze=Date.now()+3*86400000; save(); render(); };
   var b=$("#nagBackup"); if(b) b.onclick=function(){
     tab="settings"; render(); exportBackup();
     var box=$("#exportBox"); if(box && box.scrollIntoView) box.scrollIntoView({ block:"center" });
@@ -1103,6 +1112,7 @@ function threadHTML(r){
     if(compass.fuLoading) out += '<div class="bubble ai"><div class="thinking" style="padding:2px 0"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div></div>';
     out += '</div>';
   }
+  if(!state.settings.aiEnabled) return out; // a visszakérdezés csak élő AI-val működik
   out += '<div class="followup"><div class="inrow"><textarea id="fuIn" class="sm" placeholder="Kérdezz vissza… pl. „És ha ma nincs rá időm?”">'+esc(compass.fuDraft||"")+'</textarea>'+micBtn("fuIn")+'</div>'
     + '<button class="btn small" id="fuSend"'+(compass.fuLoading?' disabled':'')+'>Visszakérdezek</button></div>';
   return out;
@@ -1153,6 +1163,7 @@ function viewSelf(){
   if(!editing){
     out += nagsHTML();
     out += '<div class="daily"><div class="dl">Ma, tőled — '+esc(name())+'</div><p>'+esc(dailyMessage())+'</p></div>';
+    setTimeout(refreshDailyAI, 0);
     out += routineCard();
   }
   out += hero;
@@ -1212,7 +1223,7 @@ function bindSelf(){
     var fa=$("#fixAcc"); if(fa) fa.onclick=fixAccents;
     var rb=$("#rebuild"); if(rb) rb.onclick=function(){
       if(confirm("Biztosan újrakezded a kérdéssort? A mostani válaszaid megmaradnak alapnak.")){
-        editing=false; draft=Object.assign({},state.profile); qIndex=0; view="onboarding"; render();
+        editing=false; obQuick=false; draft=Object.assign({},state.profile); qIndex=0; view="onboarding"; render();
       }
     };
   }
@@ -1530,6 +1541,8 @@ function streakCount(){
   return streak;
 }
 function dailyMessage(){
+  var dai = state.dailyAI;
+  if(dai && dai.day===todayKey() && dai.text) return dai.text;
   var msgs = [];
   var one=ans("oneline"), why=ans("why"), values=ans("values"), proud=ans("proud"), inner=ans("inner");
   if(one) msgs.push("Te már az vagy, aki lenni akarsz — «"+one+"». Ma is így élj.");
@@ -1544,6 +1557,33 @@ function dailyMessage(){
   var d0 = new Date(); // helyi naptári nap szerint váltson (ne UTC szerint, hajnali 2-kor)
   var day = Math.floor(Date.UTC(d0.getFullYear(), d0.getMonth(), d0.getDate())/86400000);
   return msgs[day % msgs.length];
+}
+var dailyTried = {};
+function aiAvailable(){ return state.settings.aiEnabled && (!!state.settings.apiKey || !!(window.claude && typeof window.claude.use==="function")); }
+function refreshDailyAI(){
+  var day = todayKey();
+  if(!state.profile || !aiAvailable() || dailyTried[day]) return;
+  if(state.dailyAI && state.dailyAI.day===day) return;
+  dailyTried[day] = true;
+  var y = new Date(); y.setDate(y.getDate()-1);
+  var yc = (state.checkins||{})[dayKey(y.getTime())] || {}, tc = (state.checkins||{})[day] || {};
+  var info = ["Mai nap: "+new Date().toLocaleDateString("hu-HU", { weekday:"long", month:"long", day:"numeric" })];
+  if(yc.intent) info.push("Tegnapi szándéka: "+yc.intent);
+  if(yc.good) info.push("Tegnap jól ment: "+yc.good);
+  if(yc.improve) info.push("Tegnap ezen javítana: "+yc.improve);
+  if(tc.intent) info.push("Mai szándéka: "+tc.intent);
+  info.push("Sorozat: "+streakCount()+" nap");
+  getAIChat([{ role:"user", content:info.join("\n") }], "daily").then(function(t){
+    var txt = mdPlain(t).replace(/\s+/g," ").replace(/^["„«»”]+|["„«»”]+$/g,"").trim().slice(0,400);
+    if(!txt) return;
+    state.dailyAI = { day:day, text:txt }; save();
+    var el = document.querySelector(".daily p"); if(el) el.textContent = txt; // újrarajzolás nélkül, hogy a gépelést ne zavarja
+  }, function(){});
+}
+function buildDailySystem(){
+  return buildSystemPrompt().split("\n\nA felhasználó leírja")[0]
+    + "\n\nMost a NAPI ÜZENETET írod a mostani énednek, amit reggel lát az appban. 1–2 mondat, max 40 szó, első személyben, tegeződve, magyarul. "
+    + "Legyen konkrét: kapcsold a céljaihoz, a tegnapi napjához vagy a mai szándékához, ha van ilyen adat. Ne köszönj, ne használj idézőjelet, markdownt vagy emojit.";
 }
 function askCompass(){
   if(compass.loading) return;
@@ -1655,7 +1695,7 @@ function fixAccents(){
 /* Beszélgetés az AI-val. turns: [{role:"user"|"assistant", content}], a végén "user".
    Sorrend: 1) Claude-fiók (claude.ai appban, ingyen) 2) saját API-kulcs 3) hiba → a hívó offline válaszol. */
 function getAI(situation, mode){ return getAIChat([{ role:"user", content:situation }], mode); }
-function systemFor(mode){ return mode==="biz" ? buildBizSystem() : (mode==="review" ? buildReviewSystem() : buildSystemPrompt()); }
+function systemFor(mode){ return mode==="biz" ? buildBizSystem() : (mode==="review" ? buildReviewSystem() : (mode==="daily" ? buildDailySystem() : buildSystemPrompt())); }
 function getAIChat(turns, mode){
   var sys = systemFor(mode);
   turns = turns.slice(-12); // a hosszú beszélgetésből az utolsó üzenetek elegendők
@@ -1673,7 +1713,7 @@ function getAIChat(turns, mode){
         if(!sample){ tryApi(); return; }
         // a sample-nek nincs külön rendszerüzenete: az első felhasználói üzenet elé tesszük
         var input = turns.map(function(t, i){
-          return { role:t.role, content: i===0 ? sys+"\n\n--- "+(mode==="review"?"A HETEM ADATAI":"A HELYZETEM / KÉRDÉSEM")+" ---\n"+t.content+"\n\nVálaszolj a fenti szerepben, magyarul." : t.content };
+          return { role:t.role, content: i===0 ? sys+"\n\n--- "+(mode==="review"?"A HETEM ADATAI":(mode==="daily"?"A MAI NAP ADATAI":"A HELYZETEM / KÉRDÉSEM"))+" ---\n"+t.content+"\n\nVálaszolj a fenti szerepben, magyarul." : t.content };
         });
         sample(input, { modelTier: qualityTier() }).then(function(res){
           if(res && res.text) resolve(res.text); else tryApi();
@@ -2112,9 +2152,12 @@ function backupPayload(){
     celok: state.goals || [],
     napi_rutin: state.checkins || {},
     heti_visszatekintesek: state.reviews || [],
-    uzleti_szamok: state.bizLog || []
+    uzleti_szamok: state.bizLog || [],
+    beallitasok: backupSettings() // az API-kulcs biztonsági okból NEM kerül a fájlba
   };
 }
+var BACKUP_SETTINGS = ["aiEnabled","provider","quality","theme","reminderOn","reminderTime"];
+function backupSettings(){ var o={}; BACKUP_SETTINGS.forEach(function(k){ o[k]=state.settings[k]; }); return o; }
 function exportBackup(){
   var json = JSON.stringify(backupPayload(), null, 2);
   state.settings.lastBackup = Date.now(); state.settings.backupSnooze = 0; save();
@@ -2157,8 +2200,18 @@ function importBackup(text){
     var ck = data.napi_rutin; state.checkins = (ck && typeof ck==="object" && !Array.isArray(ck)) ? ck : {};
     state.reviews = arr(data.heti_visszatekintesek).filter(function(x){ return typeof x.text==="string"; }).slice(0,12);
     state.bizLog = arr(data.uzleti_szamok).filter(function(x){ return typeof x.wk==="string"; }).slice(-52);
-    save();
-    toast("Sikeresen visszaállítva");
+    var bs = data.beallitasok;
+    if(bs && typeof bs==="object"){
+      var ok = { aiEnabled:"boolean", provider:"string", quality:"string", theme:"string", reminderOn:"boolean", reminderTime:"string" };
+      BACKUP_SETTINGS.forEach(function(k){ if(typeof bs[k]===ok[k]) state.settings[k]=bs[k]; });
+      if(["openrouter","gemini","claude"].indexOf(state.settings.provider)<0) state.settings.provider="openrouter";
+      if(["system","light","dark"].indexOf(state.settings.theme)<0) state.settings.theme="system";
+      if(!/^\d{2}:\d{2}$/.test(state.settings.reminderTime)) state.settings.reminderTime="08:00";
+    }
+    state.settings.lastBackup = Date.now();
+    save(); applyTheme(); scheduleReminder();
+    var needKey = state.settings.aiEnabled && !state.settings.apiKey && !window.claude;
+    toast(needKey ? "Visszaállítva ✓ Az élő AI-hoz add meg újra a kulcsot: Beállítás" : "Sikeresen visszaállítva", needKey ? 6000 : 2200);
     view = "app"; tab = "self"; editing = false; render();
   }catch(e){ toast("Nem sikerült beolvasni a fájlt"); }
 }
